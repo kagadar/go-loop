@@ -7,55 +7,23 @@ import (
 	"time"
 )
 
-type statsKey struct{}
-
-type Stats struct {
-	runtime.MemStats
-	start    time.Time
-	lastTick time.Time
-	maxTick  time.Duration
-	minTick  time.Duration
-	total    time.Duration
-	ticks    int64
+type Main interface {
+	EnableStats(bool)
+	Stats() Stats
+	SetDelay(time.Duration)
+	Run(context.Context, func(context.Context))
 }
 
-// Duration returns the duration that Main has been running for.
-func (s *Stats) Duration() time.Duration {
-	return time.Since(s.start)
+type main struct {
+	delay         time.Duration
+	loop          *time.Ticker
+	stats         Stats
+	statsUpdateFn func(context.Context, *Stats, time.Time)
 }
 
-// MaxTick returns the longest delay between two iterations of Main.
-func (s *Stats) MaxTick() time.Duration {
-	return s.maxTick
-}
+func noop(context.Context, *Stats, time.Time) {}
 
-// MinTick returns the shortest delay between two iterations of Main.
-func (s *Stats) MinTick() time.Duration {
-	return s.minTick
-}
-
-// AvgTick returns the average delay between the iterations of Main.
-func (s *Stats) AvgTick() time.Duration {
-	return time.Duration(int64(s.total) / s.ticks)
-}
-
-// GetStats returns the Stats from the provided context.
-// GetStats will panic if the context was not provided by a Main loop with the `Stats` option set.
-func GetStats(ctx context.Context) *Stats {
-	return ctx.Value(statsKey{}).(*Stats)
-}
-
-type Options struct {
-	// The minimum time that must elapse between each iteration of Main.
-	Delay time.Duration
-	// Whether to calculate runtime stats and store them in the context used by Main.
-	Stats bool
-}
-
-func noopStats(context.Context, time.Time) {}
-
-func updateStats(ctx context.Context, tick time.Time) {
-	stats := GetStats(ctx)
+func updateStats(ctx context.Context, stats *Stats, tick time.Time) {
 	stats.ticks++
 	tickTime := tick.Sub(stats.lastTick)
 	stats.total += tickTime
@@ -69,30 +37,50 @@ func updateStats(ctx context.Context, tick time.Time) {
 	runtime.ReadMemStats(&stats.MemStats)
 }
 
-func Main(ctx context.Context, opts Options, fn func(context.Context)) {
-	stats := noopStats
-	if opts.Stats {
-		ctx = context.WithValue(ctx, statsKey{}, &Stats{
+func New(delay time.Duration) Main {
+	return &main{
+		delay: delay,
+		stats: Stats{
 			start:    time.Now(),
 			lastTick: time.Now(),
 			maxTick:  math.MinInt64,
 			minTick:  math.MaxInt64,
-		})
-		stats = updateStats
+		},
+		statsUpdateFn: noop,
 	}
+}
+
+func (m *main) EnableStats(b bool) {
+	if b {
+		m.statsUpdateFn = updateStats
+	} else {
+		m.statsUpdateFn = noop
+	}
+}
+
+func (m *main) Stats() Stats {
+	return m.stats
+}
+
+func (m *main) SetDelay(d time.Duration) {
+	if m.loop != nil {
+		m.loop.Reset(d)
+	}
+	m.delay = d
+}
+
+func (m *main) Run(ctx context.Context, fn func(context.Context)) {
 	cleanup := configureTimer()
 	defer cleanup()
-	loop := time.NewTicker(opts.Delay)
-	defer loop.Stop()
-LOOP:
+	m.loop = time.NewTicker(m.delay)
+	defer m.loop.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			loop.Stop()
-			break LOOP
+			return
 		default:
 		}
-		stats(ctx, <-loop.C)
+		m.statsUpdateFn(ctx, &m.stats, <-m.loop.C)
 		fn(ctx)
 	}
 }

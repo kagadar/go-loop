@@ -26,7 +26,8 @@ import (
 func main() {
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
     defer stop()
-    loop.Main(ctx, loop.Options{Delay: 16*time.Millisecond}, func(ctx context.Context) {
+    l := loop.New(16 * time.Millisecond)
+    l.Run(ctx, func(ctx context.Context) {
         // Do something
     })
 }

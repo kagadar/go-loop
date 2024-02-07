@@ -8,7 +8,9 @@ import (
 
 func TestMainLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	Main(ctx, Options{Delay: 1 * time.Millisecond, Stats: true}, func(ctx context.Context) {
+	loop := New(1 * time.Millisecond)
+	loop.EnableStats(true)
+	loop.Run(ctx, func(ctx context.Context) {
 		cancel()
 	})
 }
