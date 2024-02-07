@@ -18,6 +18,7 @@ MAIN_LOOP:
 			break MAIN_LOOP
 		default:
 		}
+		<-loop.C
 		fn(ctx)
 	}
 }
